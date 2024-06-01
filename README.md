@@ -2,11 +2,21 @@
 
 ## Contact.app
 
+### Stack
+
 |                    |        |
 |--------------------|--------|
 |Programming Language| Python |
 |Web Framework       | Flask  |
 |Templating Language | Jinja  |
+
+
+### Installation (Windows):
+
+- [ ] Install virtual environment: `py -3 -m venv .venv`
+- [ ] Activate `.venv\Scripts\activate`
+- [ ] Install dependencies `pip install -r requirements.txt`
+- [ ] Start server `flask --app contact_app.py run`
 
 
 ## What is the simplest thing that could possibly work?
