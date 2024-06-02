@@ -1,11 +1,14 @@
+import random
+import string
 from typing import Literal
-from flask import (
-    Flask, redirect, render_template, request, flash, jsonify, send_file, session
-)
+
+from faker import Faker
+from flask import (Flask, flash, jsonify, redirect, render_template, request,
+                   send_file, session)
 from flask.wrappers import Response
 from werkzeug.wrappers import Response
-from contacts import Contact, Archiver
 
+from contacts import Archiver, Contact
 
 # ========================================================
 # Flask App
@@ -163,6 +166,55 @@ def contacts_delete_all() -> str:
     contacts_set: list[Contact] = Contact.all(page=0)
     archiver: Archiver = Archiver.get()
     return render_template(template_name_or_list="index.html", contacts=contacts_set, archiver=archiver)
+
+
+@app.route(rule="/mock")
+def generate_mock_data() -> Response:
+    def generate_email(first_name, last_name) -> str:
+        email_domains: list[str] = [
+        "gmail.com",
+        "yahoo.com",
+        "hotmail.com",
+        "outlook.com",
+        "icloud.com",
+        "protonmail.com",
+        "zoho.com",
+        "aol.com",
+        "fastmail.com",
+        "yandex.com"
+    ]
+        formats: list[str] = [
+            f"{first_name.lower()}.{last_name.lower()}",
+            f"{first_name.lower()}_{last_name.lower()}",
+            f"{first_name.lower()}{last_name.lower()}",
+            f"{last_name.lower()}.{first_name.lower()}",
+            f"{first_name.lower()}{random.randint(1, 999)}",
+            f"{last_name.lower()}{random.randint(1, 999)}",
+            f"{first_name.lower()}.{last_name.lower()}{random.randint(1, 99)}",
+            f"{first_name.lower()[0]}{last_name.lower()}",
+            f"{first_name.lower()}.{last_name.lower()[0]}",
+            f"{''.join(random.choices(population=string.ascii_lowercase, k=8))}"
+        ]
+
+        domain: str = random.choice(seq=email_domains)
+        username: str = random.choice(seq=formats)
+        return f"{username}@{domain}"
+    
+    count = int(request.args.get('i', 10))
+
+    fake = Faker()
+
+    for _ in range(count):
+        first_name: str = fake.first_name()
+        last_name: str = fake.last_name()
+        email: str = generate_email(first_name, last_name)
+        phone: str = fake.phone_number()
+
+        contact = Contact(first=first_name, last=last_name, email=email, phone=phone)
+        contact.save()
+
+    flash(message=f"Generated {count} mock contacts.")
+    return redirect(location="/contacts")
 
 
 # Wildcard route
