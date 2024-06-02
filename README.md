@@ -19,6 +19,18 @@
 - [ ] Start server `flask --app contact_app.py run`
 
 
+### Features
+
+As a user, I can:
+
+- [ ] Read a list of contacts
+- [ ] Search contacts
+- [ ] Create a new contact
+- [ ] Read a contact's details
+- [ ] Update a contact's details
+- [ ] Delete a contact
+
+
 ## What is the simplest thing that could possibly work?
 
 This document provides an overview of web hypermedia systems, focusing on the
