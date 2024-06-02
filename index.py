@@ -1,6 +1,5 @@
-
 from flask import (
-    Flask, abort, redirect, render_template, request, flash, jsonify, send_file
+    Flask, redirect, render_template, request, flash, jsonify, send_file
 )
 from werkzeug.wrappers import Response
 from contacts import Contact, Archiver
@@ -22,19 +21,15 @@ def index() -> Response:
 
 @app.route(rule="/contacts")
 def contacts() -> str:
-    try:
-        search: str | None = request.args.get(key="q")
-        _: int | str = request.args.get(key="page", default=0)
-        if search is not None:
-            contacts_set: list[Contact] = Contact.search(text=search)
-            if request.headers.get(key='HX-Trigger') == 'search':
-                return render_template(template_name_or_list="rows.html", contacts=contacts_set)
-        else:
-            contacts_set = Contact.all()
-        return render_template(template_name_or_list="index.html", contacts=contacts_set, archiver=Archiver.get())
-    except Exception as e:
-        app.logger.error(msg=f"Exception occurred: {str(object=e)}")
-        abort(code=500, description="An internal server error occurred.")
+    search: str | None = request.args.get(key="q")
+    _: int | str = request.args.get(key="page", default=0)
+
+    if search is not None and request.headers.get(key='HX-Trigger') == 'search':
+        contacts_set: list[Contact] = Contact.search(text=search)
+        return render_template(template_name_or_list="rows.html", contacts=contacts_set)
+
+    contacts_set = Contact.all()
+    return render_template(template_name_or_list="index.html", contacts=contacts_set, archiver=Archiver.get())
 
 
 @app.route(rule="/contacts/archive", methods=["POST"])
@@ -53,7 +48,12 @@ def archive_status() -> str:
 @app.route(rule="/contacts/archive/file", methods=["GET"])
 def archive_content() -> Response:
     archiver: Archiver = Archiver.get()
-    return send_file(path_or_file=archiver.archive_file(), mimetype="archive.json", as_attachment=True)
+    return send_file(
+        path_or_file=archiver.archive_file(),
+        mimetype="text/csv",
+        as_attachment=True,
+        download_name="archive.csv"
+    )
 
 
 @app.route(rule="/contacts/archive", methods=["DELETE"])
@@ -84,7 +84,6 @@ def contacts_new() -> Response | str:
     if c.save():
         flash(message="Created New Contact!")
         return redirect(location="/contacts")
-    
     return render_template(template_name_or_list="new.html", contact=c)
 
 
@@ -122,13 +121,12 @@ def contacts_email_get(contact_id: int = -1) -> str:
         c.email = request.args.get(key='email', default='')
         _: bool = c.validate()
         return c.errors.get('email', '')
- 
     return ''
 
 
 @app.route(rule="/contacts/<int:contact_id>", methods=["DELETE"])
 def contacts_delete(contact_id: int = -1) -> Response | str:
-    contact: Contact | None = Contact.find(id_=contact_id)
+    contact: Contact | None = Contact.find(contact_id)
     if contact:
         contact.delete()
         if request.headers.get(key='HX-Trigger') == 'delete-btn':
@@ -155,20 +153,22 @@ def contacts_delete_all() -> str:
 # JSON Data API
 # ===========================================================
 
+
 @app.route(rule="/api/v0/contacts", methods=["GET"])
 def json_contacts() -> Response:
     contacts_set: list[Contact] = Contact.all()
     return jsonify({"contacts": [c.__dict__ for c in contacts_set]})
 
 
-
 @app.route(rule="/api/v0/contacts", methods=["POST"])
 def json_contacts_new() -> tuple[Response, int] | Response:
-    c = Contact(id_=None, first=request.form.get(key='first_name'), last=request.form.get('last_name'), phone=request.form.get(key='phone'),
+    c = Contact(id_=None,
+                first=request.form.get(key='first_name'),
+                last=request.form.get(key='last_name'),
+                phone=request.form.get(key='phone'),
                 email=request.form.get(key='email'))
     if c.save():
         return jsonify(c.__dict__)
-    
     return jsonify({"errors": c.errors}), 399
 
 
@@ -176,16 +176,19 @@ def json_contacts_new() -> tuple[Response, int] | Response:
 def json_contacts_view(contact_id: int = -1) -> tuple[Response, int] | Response:
     contact: Contact | None = Contact.find(contact_id)
     if contact:
-        return jsonify(contact.__dict__)
-    
+        return jsonify(contact.__dict__)  
     return jsonify({}), 404
+
 
 
 @app.route(rule="/api/v0/contacts/<int:contact_id>", methods=["PUT"])
 def json_contacts_edit(contact_id: int) -> tuple[Response, int] | Response:
     c: Contact | None = Contact.find(id_=contact_id)
     if c:
-        c.update(first=request.form['first_name'], last=request.form['last_name'], phone=request.form['phone'], email=request.form['email'])
+        c.update(first=request.form['first_name'],
+                 last=request.form['last_name'],
+                 phone=request.form['phone'],
+                 email=request.form['email'])
         if c.save():
             return jsonify(c.__dict__)
         
@@ -194,13 +197,13 @@ def json_contacts_edit(contact_id: int) -> tuple[Response, int] | Response:
     return jsonify({}), 404
 
 
+
 @app.route(rule="/api/v0/contacts/<int:contact_id>", methods=["DELETE"])
 def json_contacts_delete(contact_id: int = -1) -> tuple[Response, int] | Response:
     contact: Contact | None = Contact.find(contact_id)
     if contact:
         contact.delete()
         return jsonify({"success": True})
-    
     return jsonify({"success": False}), 404
 
 

@@ -1,28 +1,43 @@
-import sqlite3
 import json
+import os
+import tempfile
 import time
-from threading import Thread
 from random import random
+from threading import Thread
 from typing import override
 
-# ========================================================
+from dotenv import load_dotenv
+from sqlalchemy import Column, Integer, MetaData, String, Table, create_engine
+from sqlalchemy.orm import sessionmaker
+from sqlalchemy.orm.session import Session
+
 # Contact Model
 # ========================================================
+
 PAGE_SIZE = 100
 
-class Contact:
-    # mock contacts database
-    conn: sqlite3.Connection = sqlite3.connect('contacts.db', check_same_thread=False)
-    cursor: sqlite3.Cursor = conn.cursor()
-    _: sqlite3.Cursor = cursor.execute('''CREATE TABLE IF NOT EXISTS contacts (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        first TEXT,
-        last TEXT,
-        phone TEXT,
-        email TEXT UNIQUE
-    )''')
-    conn.commit()
+_ = load_dotenv()
 
+# PostgreSQL database connection
+db_url = os.environ["CONTACT_APP_URL"]
+engine = create_engine(db_url)
+Session = sessionmaker(bind=engine)
+session = Session()
+
+metadata = MetaData()
+contacts_table = Table('contacts', metadata,
+                       Column('id', Integer, primary_key=True, autoincrement=True),
+                       Column('first', String),
+                       Column('last', String),
+                       Column('phone', String),
+                       Column('email', String, unique=True)
+                       )
+
+# Create the table if it doesn't exist
+metadata.create_all(engine)
+
+
+class Contact:
     def __init__(self, id_: int | None = None, first: str | None = None, last: str | None = None,
                  phone: str | None = None, email: str | None = None) -> None:
         self.id: int | None = id_
@@ -46,10 +61,9 @@ class Contact:
         if not self.email:
             self.errors['email'] = "Email Required"
             return False
-
-        query = 'SELECT * FROM contacts WHERE email = ? AND id != ?'
-        _: sqlite3.Cursor = Contact.cursor.execute(query, (self.email, self.id if self.id else 0))
-        existing_contact: sqlite3.Row | None = Contact.cursor.fetchone()
+        query = session.query(contacts_table).filter(contacts_table.c.email == self.email,
+                                                     contacts_table.c.id != self.id)
+        existing_contact = query.first()
         if existing_contact:
             self.errors['email'] = "Email Must Be Unique"
             return False
@@ -61,70 +75,77 @@ class Contact:
             return False
 
         if self.id is None:
-            query = 'INSERT INTO contacts (first, last, phone, email) VALUES (?, ?, ?, ?)'
-            _: sqlite3.Cursor = Contact.cursor.execute(query, (self.first, self.last, self.phone, self.email))
-            self.id = Contact.cursor.lastrowid
+            query = contacts_table.insert().values(first=self.first, last=self.last, phone=self.phone,
+                                                   email=self.email)
+            result = session.execute(query)
+            self.id = result.inserted_primary_key[0]
         else:
-            query = 'UPDATE contacts SET first = ?, last = ?, phone = ?, email = ? WHERE id = ?'
-            _ = Contact.cursor.execute(query, (self.first, self.last, self.phone, self.email, self.id))
-        Contact.conn.commit()
+            query = contacts_table.update().where(contacts_table.c.id == self.id).values(first=self.first,
+                                                                                          last=self.last,
+                                                                                          phone=self.phone,
+                                                                                          email=self.email)
+            session.execute(query)
+        session.commit()
         return True
 
     def delete(self) -> None:
         if self.id is not None:
-            query = 'DELETE FROM contacts WHERE id = ?'
-            _: sqlite3.Cursor = Contact.cursor.execute(query, (self.id,))
-            Contact.conn.commit()
+            query = contacts_table.delete().where(contacts_table.c.id == self.id)
+            session.execute(query)
+            session.commit()
 
     @classmethod
     def count(cls) -> int:
         time.sleep(2)
-        query = 'SELECT COUNT(*) FROM contacts'
-        _: sqlite3.Cursor = cls.cursor.execute(query)
-        count: int = cls.cursor.fetchone()[0]
-        return count
+        query = session.query(contacts_table).count()
+        return query
 
     @classmethod
-    def all(cls, page: int = 1) -> list['Contact']:
-        page = int(page)
-        start: int = (page - 1) * PAGE_SIZE
-        query = 'SELECT * FROM contacts LIMIT ? OFFSET ?'
-        _: sqlite3.Cursor = cls.cursor.execute(query, (PAGE_SIZE, start))
-        rows: list[sqlite3.Row] = cls.cursor.fetchall()
+    def all(cls, page=None):
+        if page is None:
+            query = session.query(contacts_table)
+        else:
+            page = int(page)
+            start = (page) * PAGE_SIZE
+            query = session.query(contacts_table).limit(PAGE_SIZE).offset(start)
+        rows = query.all()
         return [Contact(
-            id_=row[0] if isinstance(row[0], int) else None,
-            first=row[1] if isinstance(row[1], str) else None,
-            last=row[2] if isinstance(row[2], str) else None,
-            phone=row[3] if isinstance(row[3], str) else None,
-            email=row[4] if isinstance(row[4], str) else None
+            id_=row.id,
+            first=row.first,
+            last=row.last,
+            phone=row.phone,
+            email=row.email
         ) for row in rows]
 
     @classmethod
-    def search(cls, text: str) -> list['Contact']:
-        query = 'SELECT * FROM contacts WHERE first LIKE ? OR last LIKE ? OR phone LIKE ? OR email LIKE ?'
+    def search(cls, text):
         like_text = f'%{text}%'
-        _: sqlite3.Cursor = cls.cursor.execute(query, (like_text, like_text, like_text, like_text))
-        rows: list[sqlite3.Row] = cls.cursor.fetchall()
+        query = session.query(contacts_table).filter(
+            contacts_table.c.first.like(like_text) |
+            contacts_table.c.last.like(like_text) |
+            contacts_table.c.phone.like(like_text) |
+            contacts_table.c.email.like(like_text)
+        )
+        rows = query.all()
         return [Contact(
-            id_=row[0] if isinstance(row[0], int) else None,
-            first=row[1] if isinstance(row[1], str) else None,
-            last=row[2] if isinstance(row[2], str) else None,
-            phone=row[3] if isinstance(row[3], str) else None,
-            email=row[4] if isinstance(row[4], str) else None
+            id_=row.id,
+            first=row.first,
+            last=row.last,
+            phone=row.phone,
+            email=row.email
         ) for row in rows]
 
     @classmethod
-    def find(cls, id_: int) -> 'Contact | None':
-        query = 'SELECT * FROM contacts WHERE id = ?'
-        _: sqlite3.Cursor = cls.cursor.execute(query, (id_,))
-        row: sqlite3.Row | None = cls.cursor.fetchone()
+    def find(cls, id_):
+        query = session.query(contacts_table).filter(contacts_table.c.id == id_)
+        row = query.first()
         if row:
             return Contact(
-                id_=row[0] if isinstance(row[0], int) else None,
-                first=row[1] if isinstance(row[1], str) else None,
-                last=row[2] if isinstance(row[2], str) else None,
-                phone=row[3] if isinstance(row[3], str) else None,
-                email=row[4] if isinstance(row[4], str) else None
+                id_=row.id,
+                first=row.first,
+                last=row.last,
+                phone=row.phone,
+                email=row.email
             )
         return None
 
@@ -132,7 +153,7 @@ class Contact:
 class Archiver:
     archive_status: str = "Waiting"
     archive_progress: float = 0
-    thread: Thread | None = None
+    thread = None
 
     def status(self) -> str:
         return Archiver.archive_status
@@ -153,18 +174,30 @@ class Archiver:
             if Archiver.archive_status != "Running":
                 return
             Archiver.archive_progress = (i + 1) / 10
-            print("Here... " + str(Archiver.archive_progress))
+            print("Here... " + str(object=Archiver.archive_progress))
         time.sleep(1)
         if Archiver.archive_status != "Running":
             return
         Archiver.archive_status = "Complete"
 
+
     def archive_file(self) -> str:
-        return 'contacts.db'
+        contacts = session.query(contacts_table).all()
+        csv_content = "id,first,last,phone,email\n"
+        for contact in contacts:
+            csv_content += f"{contact.id},{contact.first},{contact.last},{contact.phone},{contact.email}\n"
+
+        with tempfile.NamedTemporaryFile(delete=False, suffix='.csv') as temp_file:
+            temp_file.write(csv_content.encode('utf-8'))
+            temp_file_path: str = temp_file.name
+
+        return temp_file_path
+
 
     def reset(self) -> None:
         Archiver.archive_status = "Waiting"
 
     @classmethod
-    def get(cls) -> 'Archiver':
+    def get(cls) -> "Archiver":
         return Archiver()
+
