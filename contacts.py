@@ -19,7 +19,7 @@ PAGE_SIZE = 100
 _ = load_dotenv()
 
 # PostgreSQL database connection
-db_url = os.environ["CONTACT_APP_URL"]
+db_url = os.environ["CONNECTION_STRING"]
 engine = create_engine(db_url)
 Session = sessionmaker(bind=engine)
 session = Session()
