@@ -1,15 +1,24 @@
 {
-    "version": 2,
     "builds": [
-        {
-            "src": "./index.py",
-            "use": "@vercel/python"
+      {
+        "src": "*.py",
+        "use": "@vercel/python",
+        "config": {
+          "maxLambdaSize": "15mb",
+          "runtime": "python3.12"
         }
+      }
     ],
-    "routes": [
-        {
-            "src": "/(.*)",
-            "dest": "/"
-        }
-    ]
-}
+    "build": {
+      "env": {
+        "PYTHON_VERSION": "3.12"
+      }
+    },
+    "rewrites": [
+      {
+        "source": "/(.*)",
+        "destination": "/index.py"
+      }
+    ],
+    "buildCommand": "apt-get update && apt-get install -y libpq-dev && pip3.12 install -r requirements.txt"
+  }
