@@ -1,6 +1,8 @@
+from typing import Literal
 from flask import (
-    Flask, redirect, render_template, request, flash, jsonify, send_file
+    Flask, redirect, render_template, request, flash, jsonify, send_file, session
 )
+from flask.wrappers import Response
 from werkzeug.wrappers import Response
 from contacts import Contact, Archiver
 
@@ -24,12 +26,16 @@ def contacts() -> str:
     search: str | None = request.args.get(key="q")
     _: int | str = request.args.get(key="page", default=0)
 
-    if search is not None and request.headers.get(key='HX-Trigger') == 'search':
-        contacts_set: list[Contact] = Contact.search(text=search)
-        return render_template(template_name_or_list="rows.html", contacts=contacts_set)
+    try:
+        if search is not None and request.headers.get(key='HX-Trigger') == 'search':
+            contacts_set: list[Contact] = Contact.search(text=search)
+            return render_template(template_name_or_list="rows.html", contacts=contacts_set)
 
-    contacts_set = Contact.all()
-    return render_template(template_name_or_list="index.html", contacts=contacts_set, archiver=Archiver.get())
+        contacts_set = Contact.all()
+        return render_template(template_name_or_list="index.html", contacts=contacts_set, archiver=Archiver.get())
+    except Exception as e:
+        session.rollback()
+        raise e
 
 
 @app.route(rule="/contacts/archive", methods=["POST"])
@@ -88,15 +94,23 @@ def contacts_new() -> Response | str:
 
 
 @app.route(rule="/contacts/<int:contact_id>")
-def contacts_view(contact_id: int = -1) -> str:
+def contacts_view(contact_id: int = -1) -> str | Response:
     contact: Contact | None = Contact.find(id_=contact_id)
-    return render_template(template_name_or_list="show.html", contact=contact)
+    if contact:
+        return render_template(template_name_or_list="show.html", contact=contact)
+    else:
+        flash(message="Contact not found.")
+        return redirect(location="/contacts")
 
 
 @app.route(rule="/contacts/<int:contact_id>/edit", methods=["GET"])
-def contacts_edit_get(contact_id: int = -1) -> str:
+def contacts_edit_get(contact_id: int = -1) -> str | Response:
     contact: Contact | None = Contact.find(id_=contact_id)
-    return render_template(template_name_or_list="edit.html", contact=contact)
+    if contact:
+        return render_template(template_name_or_list="edit.html", contact=contact)
+    else:
+        flash(message="Contact not found.")
+        return redirect(location="/contacts")
 
 
 @app.route(rule="/contacts/<int:contact_id>/edit", methods=["POST"])
@@ -111,7 +125,9 @@ def contacts_edit_post(contact_id: int = -1) -> Response | str:
             flash(message="Updated Contact!")
             return redirect(location=f"/contacts/{contact_id}")
         return render_template(template_name_or_list="edit.html", contact=c)
-    return redirect(location="/contacts")
+    else:
+        flash(message="Contact not found.")
+        return redirect(location="/contacts")
 
 
 @app.route(rule="/contacts/<int:contact_id>/email", methods=["GET"])
@@ -149,6 +165,17 @@ def contacts_delete_all() -> str:
     return render_template(template_name_or_list="index.html", contacts=contacts_set, archiver=archiver)
 
 
+# Wildcard route
+@app.route(rule='/<path:path>')
+def catch_all(path) -> Response:
+    return redirect(location='/404')
+
+# 404 error route
+@app.route(rule='/404')
+def page_not_found() -> tuple[str, Literal[404]]:
+    return render_template(template_name_or_list='404.html'), 404
+
+
 # ===========================================================
 # JSON Data API
 # ===========================================================
@@ -176,9 +203,9 @@ def json_contacts_new() -> tuple[Response, int] | Response:
 def json_contacts_view(contact_id: int = -1) -> tuple[Response, int] | Response:
     contact: Contact | None = Contact.find(contact_id)
     if contact:
-        return jsonify(contact.__dict__)  
-    return jsonify({}), 404
-
+        return jsonify(contact.__dict__)
+    else:
+        return jsonify({'error': 'Contact not found'}), 404
 
 
 @app.route(rule="/api/v0/contacts/<int:contact_id>", methods=["PUT"])
@@ -191,11 +218,10 @@ def json_contacts_edit(contact_id: int) -> tuple[Response, int] | Response:
                  email=request.form['email'])
         if c.save():
             return jsonify(c.__dict__)
-        
-        return jsonify({"errors": c.errors}), 399
-    
-    return jsonify({}), 404
 
+        return jsonify({"errors": c.errors}), 399
+    else:
+        return jsonify({'error': 'Contact not found'}), 404
 
 
 @app.route(rule="/api/v0/contacts/<int:contact_id>", methods=["DELETE"])
@@ -204,7 +230,33 @@ def json_contacts_delete(contact_id: int = -1) -> tuple[Response, int] | Respons
     if contact:
         contact.delete()
         return jsonify({"success": True})
-    return jsonify({"success": False}), 404
+    else:
+        return jsonify({"success": False}), 404
+
+
+# ===========================================================
+# Error Handlers
+# ===========================================================
+
+
+@app.errorhandler(code_or_exception=404)
+def handle_not_found(error) -> tuple[str, Literal[404]]:
+    return render_template(template_name_or_list='404.html'), 404
+
+
+@app.errorhandler(code_or_exception=500)
+def handle_internal_server_error(error) -> tuple[str, Literal[500]]:
+    return render_template(template_name_or_list='500.html'), 500
+
+
+@app.errorhandler(code_or_exception=Exception)
+def handle_exception(error) -> Response | tuple[str, Literal[500]]:
+    if request.headers.get('Content-Type') == 'application/json':
+        response: Response = jsonify({'error': str(object=error)})
+        response.status_code = 500
+        return response
+    else:
+        return render_template(template_name_or_list='500.html'), 500
 
 
 if __name__ == "__main__":
